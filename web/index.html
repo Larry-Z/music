@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="吉他 / 尤克里里练习工具：调音器、节拍器、节奏训练、和弦库">
+<title>吉他 · 尤克里里练习台</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">♪</span>
+    <h1>吉他 · 尤克里里练习台</h1>
+  </div>
+  <nav class="tabs" id="tabs" role="tablist">
+    <button class="tab is-active" id="tab-tuner" role="tab" data-panel="tuner" aria-controls="panel-tuner" aria-selected="true">调音器</button>
+    <button class="tab" id="tab-metronome" role="tab" data-panel="metronome" aria-controls="panel-metronome" aria-selected="false">节拍器</button>
+    <button class="tab" id="tab-rhythm" role="tab" data-panel="rhythm" aria-controls="panel-rhythm" aria-selected="false">节奏训练</button>
+    <button class="tab" id="tab-chords" role="tab" data-panel="chords" aria-controls="panel-chords" aria-selected="false">和弦库</button>
+  </nav>
+  <p class="hint" id="audio-hint">首次使用请点击页面任意位置以启用音频</p>
+</header>
+
+<main>
+  <!-- ======================= 调音器 ======================= -->
+  <section class="panel is-active" id="panel-tuner" role="tabpanel" aria-labelledby="tab-tuner">
+    <div class="card">
+      <div class="card-head">
+        <h2>调音器</h2>
+        <p class="muted">用麦克风采集声音，实时识别绝对音高。音准在 ±5 音分内显示绿色。</p>
+      </div>
+
+      <div class="tuner-controls">
+        <label class="field">
+          <span>调弦预设</span>
+          <select id="tuner-preset"></select>
+        </label>
+        <label class="field">
+          <span>参考音 A4 (Hz)</span>
+          <input id="tuner-ref" type="number" value="440" min="415" max="466" step="1">
+        </label>
+        <label class="field">
+          <span>识别模式</span>
+          <select id="tuner-mode">
+            <option value="auto">自动识别（十二平均律）</option>
+            <option value="string">按弦识别（只匹配当前调弦）</option>
+          </select>
+        </label>
+        <button class="btn primary" id="tuner-toggle">开始聆听</button>
+      </div>
+
+      <div class="tuner-display" id="tuner-display">
+        <div class="note-readout">
+          <div class="note-name" id="tuner-note">--</div>
+          <div class="note-meta">
+            <span id="tuner-freq">-- Hz</span>
+            <span id="tuner-cents">-- 音分</span>
+          </div>
+        </div>
+
+        <div class="meter" id="tuner-meter" aria-hidden="true">
+          <div class="meter-scale">
+            <span>-50</span><span>-25</span><span>0</span><span>+25</span><span>+50</span>
+          </div>
+          <div class="meter-track">
+            <div class="meter-center"></div>
+            <div class="meter-needle" id="tuner-needle"></div>
+          </div>
+        </div>
+
+        <div class="tuner-status" id="tuner-status" aria-live="polite">等待开始</div>
+        <div class="tuner-verdict" id="tuner-verdict" aria-live="polite"></div>
+        <div class="tuner-strings" id="tuner-strings"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 节拍器 ======================= -->
+  <section class="panel" id="panel-metronome" role="tabpanel" aria-labelledby="tab-metronome" aria-hidden="true">
+    <div class="card">
+      <div class="card-head">
+        <h2>节拍器</h2>
+        <p class="muted">支持 30–260 BPM、任意拍号、四分 / 八分 / 三连音 / 十六分细分，并可设置每小节第一拍重音。</p>
+      </div>
+
+      <div class="metro-top">
+        <div class="bpm-block">
+          <button class="btn ghost" id="metro-minus" aria-label="降低速度">−</button>
+          <div class="bpm-value">
+            <input id="metro-bpm" type="number" value="75" min="30" max="260" step="1" aria-label="每分钟拍数">
+            <span>BPM</span>
+          </div>
+          <button class="btn ghost" id="metro-plus" aria-label="提高速度">+</button>
+        </div>
+        <input id="metro-bpm-slider" class="slider" type="range" min="30" max="260" value="75" aria-label="节拍器速度">
+        <button class="btn" id="metro-tap">Tap 测速</button>
+      </div>
+
+      <div class="metro-grid">
+        <label class="field">
+          <span>拍号（每小节拍数）</span>
+          <select id="metro-beats"></select>
+        </label>
+        <label class="field">
+          <span>拍号（音符时值）</span>
+          <select id="metro-unit">
+            <option value="2">2 分音符 / 2</option>
+            <option value="4" selected>4 分音符 / 4</option>
+            <option value="8">8 分音符 / 8</option>
+            <option value="16">16 分音符 / 16</option>
+          </select>
+        </label>
+        <div class="field">
+          <span>拍子细分</span>
+          <div class="segmented" id="metro-subdiv">
+            <button data-sub="1" class="is-active">四分</button>
+            <button data-sub="2">八分</button>
+            <button data-sub="3">三连音</button>
+            <button data-sub="4">十六分</button>
+          </div>
+        </div>
+        <label class="field">
+          <span>音色</span>
+          <select id="metro-sound">
+            <option value="click">木质敲击</option>
+            <option value="beep">电子哔声</option>
+            <option value="wood">鼓棒</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>音量</span>
+          <input id="metro-volume" class="slider" type="range" min="0" max="100" value="70">
+        </label>
+        <label class="field checkbox">
+          <input id="metro-accent" type="checkbox" checked>
+          <span>每小节第一拍重音</span>
+        </label>
+        <label class="field checkbox">
+          <input id="metro-countin" type="checkbox" checked>
+          <span>开始前数 1 小节预备拍</span>
+        </label>
+      </div>
+
+      <div class="metro-visual">
+        <div class="beat-dots" id="metro-dots"></div>
+        <div class="metro-readout" id="metro-readout">75 BPM · 4/4 · 四分</div>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" id="metro-toggle">开始</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 节奏训练 ======================= -->
+  <section class="panel" id="panel-rhythm" role="tabpanel" aria-labelledby="tab-rhythm" aria-hidden="true">
+    <div class="card">
+      <div class="card-head">
+        <h2>节奏训练器</h2>
+        <p class="muted">常用吉他 / 尤克里里扫弦与节奏型。点击卡片载入，跟着和弦声音一起练习。</p>
+      </div>
+
+      <div class="filters" id="rhythm-filters">
+        <button class="chip is-active" data-instrument="all">全部</button>
+        <button class="chip" data-instrument="guitar">吉他</button>
+        <button class="chip" data-instrument="ukulele">尤克里里</button>
+      </div>
+
+      <div class="rhythm-layout">
+        <div class="pattern-list" id="pattern-list"></div>
+
+        <div class="pattern-detail" id="pattern-detail">
+          <h3 id="pattern-title">请选择一个节奏型</h3>
+          <p class="muted" id="pattern-desc"></p>
+          <div class="pattern-meta" id="pattern-meta"></div>
+          <div class="pattern-grid" id="pattern-grid"></div>
+          <div class="legend" id="stroke-legend"></div>
+
+          <div class="metro-top compact">
+            <div class="bpm-block">
+              <button class="btn ghost" id="rhythm-minus" aria-label="降低速度">−</button>
+              <div class="bpm-value">
+                <input id="rhythm-bpm" type="number" value="75" min="30" max="240" step="1" aria-label="每分钟拍数">
+                <span>BPM</span>
+              </div>
+              <button class="btn ghost" id="rhythm-plus" aria-label="提高速度">+</button>
+            </div>
+            <input id="rhythm-bpm-slider" class="slider" type="range" min="30" max="240" value="75" aria-label="节奏训练速度">
+          </div>
+
+          <div class="actions">
+            <label class="field">
+              <span>练习和弦</span>
+              <select id="rhythm-chord"></select>
+            </label>
+            <button class="btn primary" id="rhythm-toggle" disabled>播放节奏</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 和弦库 ======================= -->
+  <section class="panel" id="panel-chords" role="tabpanel" aria-labelledby="tab-chords" aria-hidden="true">
+    <div class="card">
+      <div class="card-head">
+        <h2 id="chord-title">和弦库</h2>
+        <p class="muted" id="chord-desc">正在加载和弦数据…</p>
+      </div>
+
+      <div class="filters" id="chord-instruments"></div>
+      <div class="filters" id="chord-roots"></div>
+      <div class="filters" id="chord-qualities"></div>
+
+      <div class="chord-grid" id="chord-grid"></div>
+      <p class="legend-note">
+        指法图：<strong>○</strong> 空弦 · <strong>×</strong> 不弹 · 数字为按弦手指（1 食指 / 2 中指 / 3 无名指 / 4 小指）·
+        竖线从左到右依次是尤克里里的 4→1 弦（G-C-E-A）与吉他的 6→1 弦（E-A-D-G-B-E）·
+        高把位指法在左侧标注起始品位（如 <strong>4fr</strong>）
+      </p>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <span id="footer-info">Go + Web Audio API · 无前端构建步骤</span>
+</footer>
+
+<script src="/js/audio.js"></script>
+<script src="/js/tuner.js"></script>
+<script src="/js/metronome.js"></script>
+<script src="/js/rhythm.js"></script>
+<script src="/js/chords.js"></script>
+<script src="/js/main.js"></script>
+</body>
+</html>
