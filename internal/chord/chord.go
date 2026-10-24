@@ -24,20 +24,20 @@ type Instrument struct {
 	Label   string   `json:"label"`
 	Tuning  []string `json:"tuning"`
 	Strings int      `json:"strings"`
-	// openPitch is the pitch class of each open string, thickest string first.
-	openPitch []int
+	// OpenMIDI contains open-string MIDI pitches in physical string order.
+	OpenMIDI []int `json:"openMidi"`
 }
 
 var instruments = []Instrument{
 	{
 		Key: InstrumentUkulele, Label: "尤克里里",
 		Tuning: []string{"G4", "C4", "E4", "A4"}, Strings: 4,
-		openPitch: []int{7, 0, 4, 9},
+		OpenMIDI: []int{67, 60, 64, 69},
 	},
 	{
 		Key: InstrumentGuitar, Label: "吉他",
 		Tuning: []string{"E2", "A2", "D3", "G3", "B3", "E4"}, Strings: 6,
-		openPitch: []int{4, 9, 2, 7, 11, 4},
+		OpenMIDI: []int{40, 45, 50, 55, 59, 64},
 	},
 }
 
@@ -107,7 +107,11 @@ func InstrumentLabel(key string) string {
 func openPitchFor(key string) []int {
 	for _, in := range instruments {
 		if in.Key == key {
-			return in.openPitch
+			out := make([]int, len(in.OpenMIDI))
+			for i, midi := range in.OpenMIDI {
+				out[i] = midi % 12
+			}
+			return out
 		}
 	}
 	return nil

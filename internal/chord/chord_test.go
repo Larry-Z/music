@@ -1,9 +1,27 @@
 package chord
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestInstrumentMIDIMatchesTuning(t *testing.T) {
+	for _, in := range Instruments() {
+		if len(in.OpenMIDI) != in.Strings || len(in.Tuning) != in.Strings {
+			t.Fatalf("%s: tuning length differs from string count", in.Key)
+		}
+		for i, midi := range in.OpenMIDI {
+			if midi < 0 || midi > 127 {
+				t.Fatalf("%s string %d: MIDI pitch %d out of range", in.Key, i, midi)
+			}
+			label := pitchClasses[midi%12] + strconv.Itoa(midi/12-1)
+			if label != in.Tuning[i] {
+				t.Errorf("%s string %d: MIDI %d is %s, want %s", in.Key, i, midi, label, in.Tuning[i])
+			}
+		}
+	}
+}
 
 // formulas 是各和弦类型相对根音的音程（半音），用于校验指法是否真的构成该和弦。
 var formulas = map[string][]int{

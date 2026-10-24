@@ -3,12 +3,6 @@
 (function (global) {
   'use strict';
 
-  /* 各乐器标准调弦的 MIDI 音高（最粗的弦在前）。 */
-  var STRING_MIDI = {
-    ukulele: [67, 60, 64, 69],           /* G4 C4 E4 A4 */
-    guitar: [40, 45, 50, 55, 59, 64]     /* E2 A2 D3 G3 B3 E4 */
-  };
-
   var ROOT_LABEL = { 'A#': 'Bb' };
 
   var NUT_Y = 40;
@@ -29,14 +23,18 @@
   function midiToFreq(midi) { return 440 * Math.pow(2, (midi - 69) / 12); }
 
   /* 把和弦指法换算成频率列表（从最粗的弦到最细的弦），不弹的弦跳过。 */
-  function chordFreqs(chord) {
-    var tuning = STRING_MIDI[chord.instrument] || STRING_MIDI.ukulele;
+  function chordFreqs(chord, instruments) {
+    var list = instruments || state.instruments;
+    var tuning = null;
+    for (var k = 0; k < list.length; k++) {
+      if (list[k].key === chord.instrument) { tuning = list[k].openMidi; break; }
+    }
+    if (!tuning || tuning.length !== chord.frets.length) return [];
     var out = [];
     for (var i = 0; i < chord.frets.length; i++) {
       if (chord.frets[i] < 0 || i >= tuning.length) continue;
       out.push(midiToFreq(tuning[i] + chord.frets[i]));
     }
-    if (!out.length) out.push(midiToFreq(60));
     return out;
   }
 
@@ -210,7 +208,7 @@
     var ctx = global.MusicAudio.unlock();
     global.MusicAudio.cancelGroup('chord-preview');
     global.MusicAudio.strum(chordFreqs(chord), ctx.currentTime + 0.02, 'down', 0.26, 'chord-preview',
-      chord.instrument === 'guitar' ? 1.8 : 1.4, null, chord.instrument);
+      chord.instrument === 'guitar' ? 2.6 : 1.7, null, chord.instrument);
     card.classList.add('is-playing');
     global.setTimeout(function () { card.classList.remove('is-playing'); }, 500);
   }
@@ -256,10 +254,7 @@
       if (card) play(card);
     });
 
-    fetch('/api/chords').then(function (r) {
-      if (!r.ok) throw new Error('/api/chords 返回 HTTP ' + r.status);
-      return r.json();
-    }).then(function (data) {
+    global.MusicData.load('/api/chords').then(function (data) {
       state.chords = data.chords || [];
       state.instruments = data.instruments || [];
       state.qualities = data.qualities || [];
@@ -288,7 +283,6 @@
     stop: stopPreview,
     diagram: diagram,
     chordFreqs: chordFreqs,
-    stringMidi: STRING_MIDI,
     instrumentLabel: instrumentLabel,
     state: state
   };

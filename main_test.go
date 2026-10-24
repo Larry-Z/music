@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func newTestHandler(t *testing.T) http.Handler {
@@ -50,10 +51,11 @@ func TestChordsAPI(t *testing.T) {
 	}
 	var body struct {
 		Instruments []struct {
-			Key     string   `json:"key"`
-			Label   string   `json:"label"`
-			Tuning  []string `json:"tuning"`
-			Strings int      `json:"strings"`
+			Key      string   `json:"key"`
+			Label    string   `json:"label"`
+			Tuning   []string `json:"tuning"`
+			Strings  int      `json:"strings"`
+			OpenMIDI []int    `json:"openMidi"`
 		} `json:"instruments"`
 		Chords []struct {
 			Name       string   `json:"name"`
@@ -92,6 +94,9 @@ func TestChordsAPI(t *testing.T) {
 		}
 		if len(in.Tuning) != in.Strings {
 			t.Errorf("instrument %q: %d tuning entries for %d strings", in.Key, len(in.Tuning), in.Strings)
+		}
+		if len(in.OpenMIDI) != in.Strings {
+			t.Errorf("instrument %q: %d MIDI pitches for %d strings", in.Key, len(in.OpenMIDI), in.Strings)
 		}
 		for _, c := range body.Chords {
 			if c.Instrument == in.Key && len(c.Frets) != in.Strings {
@@ -141,11 +146,89 @@ func TestStaticIndexIsServed(t *testing.T) {
 }
 
 func TestStaticAssetsAreServed(t *testing.T) {
-	for _, path := range []string{"/css/style.css", "/js/main.js", "/js/tuner.js", "/js/audio.js"} {
+	for _, path := range []string{"/css/style.css", "/js/main.js", "/js/tuner.js", "/js/audio.js", "/js/data.js"} {
 		rec := get(t, newTestHandler(t), path)
 		if rec.Code != http.StatusOK {
 			t.Errorf("GET %s = %d, want 200", path, rec.Code)
 		}
+	}
+}
+
+func TestConditionalGETAndHEAD(t *testing.T) {
+	h := newTestHandler(t)
+	for _, path := range []string{"/api/chords", "/api/rhythms", "/js/audio.js", "/js/data.js", "/css/style.css"} {
+		t.Run(path, func(t *testing.T) {
+			first := get(t, h, path)
+			etag := first.Header().Get("ETag")
+			if etag == "" || first.Header().Get("Cache-Control") != "no-cache" {
+				t.Fatalf("missing cache validation headers: %v", first.Header())
+			}
+			for _, match := range []string{etag, "W/" + etag, `"old", ` + etag, "*"} {
+				request := httptest.NewRequest(http.MethodGet, path, nil)
+				request.Header.Set("If-None-Match", match)
+				response := httptest.NewRecorder()
+				h.ServeHTTP(response, request)
+				if response.Code != http.StatusNotModified || response.Body.Len() != 0 {
+					t.Errorf("If-None-Match %q: status=%d, bytes=%d", match, response.Code, response.Body.Len())
+				}
+			}
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			request.Header.Set("If-None-Match", `"old"`)
+			response := httptest.NewRecorder()
+			h.ServeHTTP(response, request)
+			if response.Code != http.StatusOK || response.Body.String() != first.Body.String() {
+				t.Error("stale ETag did not return the current body")
+			}
+			head := httptest.NewRecorder()
+			h.ServeHTTP(head, httptest.NewRequest(http.MethodHead, path, nil))
+			if head.Code != http.StatusOK || head.Body.Len() != 0 || head.Header().Get("ETag") != etag {
+				t.Errorf("HEAD status=%d, bytes=%d, ETag=%q", head.Code, head.Body.Len(), head.Header().Get("ETag"))
+			}
+		})
+	}
+}
+
+func TestAssetETagChangesWithContent(t *testing.T) {
+	makeHandler := func(content string) http.Handler {
+		static := fstest.MapFS{"js/main.js": {Data: []byte(content)}}
+		h, err := cacheAssets(http.FileServer(http.FS(static)), static, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	first := get(t, makeHandler("old"), "/js/main.js")
+	request := httptest.NewRequest(http.MethodGet, "/js/main.js", nil)
+	request.Header.Set("If-None-Match", first.Header().Get("ETag"))
+	response := httptest.NewRecorder()
+	makeHandler("new").ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != "new" || response.Header().Get("ETag") == first.Header().Get("ETag") {
+		t.Fatal("changed asset was not refreshed")
+	}
+}
+
+func TestDiskAssetsAreNotCached(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "js"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "js", "main.js")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h, err := newHandler(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := get(t, h, "/js/main.js")
+	if first.Header().Get("Cache-Control") != "no-store" || first.Header().Get("ETag") != "" {
+		t.Fatalf("disk asset should not be cached: %v", first.Header())
+	}
+	if err := os.WriteFile(path, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if response := get(t, h, "/js/main.js"); response.Body.String() != "new" {
+		t.Fatal("disk edit is not visible without rebuilding the handler")
 	}
 }
 

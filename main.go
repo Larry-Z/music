@@ -9,7 +9,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -108,14 +110,27 @@ func newHandler(webDir string) (http.Handler, error) {
 		static = sub
 	}
 
+	chords, err := newJSONHandler(chord.NewLibrary())
+	if err != nil {
+		return nil, fmt.Errorf("chord library: %w", err)
+	}
+	rhythms, err := newJSONHandler(rhythm.NewLibrary())
+	if err != nil {
+		return nil, fmt.Errorf("rhythm library: %w", err)
+	}
+	assets, err := cacheAssets(http.FileServer(http.FS(static)), static, webDir != "")
+	if err != nil {
+		return nil, fmt.Errorf("static assets: %w", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", handleHealth)
-	mux.HandleFunc("GET /api/chords", handleChords)
-	mux.HandleFunc("GET /api/rhythms", handleRhythms)
+	mux.Handle("GET /api/chords", chords)
+	mux.Handle("GET /api/rhythms", rhythms)
 	mux.HandleFunc("/api/health", methodNotAllowed)
 	mux.HandleFunc("/api/chords", methodNotAllowed)
 	mux.HandleFunc("/api/rhythms", methodNotAllowed)
-	mux.Handle("/", noCacheHTML(http.FileServer(http.FS(static))))
+	mux.Handle("/", assets)
 
 	return logRequests(mux), nil
 }
@@ -126,18 +141,27 @@ func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"version": version,
 	})
 }
 
-func handleChords(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, chord.NewLibrary())
-}
-
-func handleRhythms(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, rhythm.NewLibrary())
+// newJSONHandler serializes immutable library data once per server instance.
+func newJSONHandler(payload any) (http.Handler, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	body = append(body, '\n')
+	etag := contentETag(body)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("ETag", etag)
+		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(body))
+	}), nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -148,15 +172,41 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	}
 }
 
-// noCacheHTML keeps the HTML shell out of the browser cache so that a rebuilt
-// binary is picked up on reload. Static assets may still be cached.
-func noCacheHTML(next http.Handler) http.Handler {
+func contentETag(body []byte) string {
+	return fmt.Sprintf(`"%x"`, sha256.Sum256(body))
+}
+
+// cacheAssets validates embedded assets by content, while disk mode always
+// fetches fresh files so edits within a filesystem timestamp tick are visible.
+func cacheAssets(next http.Handler, static fs.FS, dev bool) (http.Handler, error) {
+	etags := map[string]string{}
+	if !dev {
+		if err := fs.WalkDir(static, ".", func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || (!strings.HasPrefix(path, "js/") && !strings.HasPrefix(path, "css/")) {
+				return nil
+			}
+			body, err := fs.ReadFile(static, path)
+			if err != nil {
+				return err
+			}
+			etags["/"+path] = contentETag(body)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+		if dev || r.URL.Path == "/" || r.URL.Path == "/index.html" {
 			w.Header().Set("Cache-Control", "no-store")
+		} else if etag := etags[r.URL.Path]; etag != "" {
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("ETag", etag)
 		}
 		next.ServeHTTP(w, r)
-	})
+	}), nil
 }
 
 // statusRecorder captures the response code for the access log.

@@ -5,14 +5,16 @@
 
   var LOOKAHEAD_MS = 25;      /* 调度器轮询间隔 */
   var SCHEDULE_AHEAD = 0.12;  /* 提前排程的音频时间窗口（秒） */
+  var MIN_STEP_SECONDS = 0.05;
+  var MAX_STEPS_PER_TICK = Math.ceil(SCHEDULE_AHEAD / MIN_STEP_SECONDS) + 1;
   var BPM_STORAGE_KEY = 'music.metronome.bpm';
 
   /**
    * 通用步进时钟。
    * @param {object} opts
    *   opts.secondsPerStep() -> number  每一步的时长
-   *   opts.onStep(step, time)          在音频时间 time 播放第 step 步
-   *   opts.onScheduleDone()            可选，排程后的回调（用于 UI）
+   *   opts.onStep(step, time, duration) 在音频时间 time 播放第 step 步
+   *   opts.onSkip(skipped)              可选，跳过漏拍后清理声音与 UI
    */
   function createClock(opts) {
     var timer = null;
@@ -20,15 +22,35 @@
     var step = 0;
     var clock = { running: false, step: 0 };
 
+    function stepDuration() {
+      var duration = opts.secondsPerStep();
+      return isFinite(duration) ? Math.max(MIN_STEP_SECONDS, duration) : MIN_STEP_SECONDS;
+    }
+
     function tick() {
+      if (!clock.running) return;
       var c = global.MusicAudio.context();
-      while (nextTime < c.currentTime + SCHEDULE_AHEAD) {
-        opts.onStep(step, nextTime);
-        nextTime += Math.max(0.05, opts.secondsPerStep());
+      var horizon = c.currentTime + SCHEDULE_AHEAD;
+      var attempts = 0;
+      while (clock.running && nextTime < horizon && attempts < MAX_STEPS_PER_TICK) {
+        attempts++;
+        var duration = stepDuration();
+        var now = c.currentTime;
+        /* 卡顿后直接跳到尚未过期的步骤，保持拍位，不集中补播漏拍。 */
+        if (nextTime < now) {
+          var skipped = Math.ceil((now - nextTime) / duration);
+          nextTime += skipped * duration;
+          step += skipped;
+          clock.step = step;
+          if (opts.onSkip) opts.onSkip(skipped);
+          continue;
+        }
+        opts.onStep(step, nextTime, duration);
+        nextTime += duration;
         step++;
         clock.step = step;
       }
-      timer = global.setTimeout(tick, LOOKAHEAD_MS);
+      if (clock.running) timer = global.setTimeout(tick, LOOKAHEAD_MS);
     }
 
     clock.start = function () {
@@ -153,6 +175,11 @@
     clock = createClock({
       secondsPerStep: secondsPerStep,
       onStep: onStep,
+      onSkip: function () {
+        global.MusicAudio.cancelGroup('metronome');
+        pending = [];
+        clearDots();
+      },
       onStart: function () {
         pending = [];
         state.countInSteps = state.countIn ? stepsPerBar() : 0;
@@ -276,7 +303,7 @@
     el.toggle.addEventListener('click', toggle);
 
     document.addEventListener('keydown', function (ev) {
-      if (ev.code !== 'Space') return;
+      if (ev.code !== 'Space' || ev.repeat) return;
       var tag = (ev.target.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'select' || tag === 'button' || tag === 'textarea') return;
       var panel = document.getElementById('panel-metronome');
